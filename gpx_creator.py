@@ -29,6 +29,7 @@ from datetime import datetime
 import uuid
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
+import re
 
 
 class GPXCreatorApp:
@@ -93,6 +94,164 @@ class GPXCreatorApp:
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
     
+    def is_decimal_degrees(self, value):
+        """Check if value is in decimal degrees format"""
+        if not value or not value.strip():
+            return False
+        try:
+            num = float(value.strip())
+            return True
+        except ValueError:
+            return False
+    
+    def detect_coordinate_format(self, value):
+        """Detect the format of a coordinate string"""
+        if not value or not value.strip():
+            return None
+        
+        value = value.strip()
+        
+        # Check if it's already decimal degrees
+        if self.is_decimal_degrees(value):
+            return "decimal"
+        
+        # Check for DMS format (degrees° minutes' seconds" or degrees minutes seconds)
+        # Patterns: 33°14'11" or 33 14 11 or 33-14-11 or 33°14'11.5" or 33° 14' 11"
+        dms_pattern = r'^(-?\d+)[°\s\-]+\s*(\d+)[\'\s\-]+\s*(\d+(?:\.\d+)?)["\s]*([NSEW])?$'
+        match = re.match(dms_pattern, value, re.IGNORECASE)
+        if match:
+            return "dms"
+        
+        # Check for DM format (degrees° minutes' or degrees minutes)
+        # Patterns: 33°14.5' or 33 14.5 or 33-14.5 or 33° 14.5'
+        dm_pattern = r'^(-?\d+)[°\s\-]+\s*(\d+(?:\.\d+)?)[\'\s]*([NSEW])?$'
+        match = re.match(dm_pattern, value, re.IGNORECASE)
+        if match:
+            return "dm"
+        
+        return None
+    
+    def convert_dms_to_decimal(self, value):
+        """Convert degrees/minutes/seconds to decimal degrees"""
+        value = value.strip()
+        # Pattern: degrees° minutes' seconds" [NSEW] (hyphens treated as separators)
+        pattern = r'^(-?\d+)[°\s\-]+\s*(\d+)[\'\s\-]+\s*(\d+(?:\.\d+)?)["\s]*([NSEW])?$'
+        match = re.match(pattern, value, re.IGNORECASE)
+        if not match:
+            return None
+        
+        degrees = float(match.group(1))
+        minutes = float(match.group(2))
+        seconds = float(match.group(3))
+        direction = match.group(4)
+        
+        decimal = abs(degrees) + minutes / 60.0 + seconds / 3600.0
+        
+        # Apply sign based on direction or original sign
+        if direction:
+            if direction.upper() in ['S', 'W']:
+                decimal = -decimal
+        elif degrees < 0:
+            decimal = -decimal
+        
+        return decimal
+    
+    def convert_dm_to_decimal(self, value):
+        """Convert degrees/minutes to decimal degrees"""
+        value = value.strip()
+        # Pattern: degrees° minutes' [NSEW] (hyphens treated as separators)
+        pattern = r'^(-?\d+)[°\s\-]+\s*(\d+(?:\.\d+)?)[\'\s]*([NSEW])?$'
+        match = re.match(pattern, value, re.IGNORECASE)
+        if not match:
+            return None
+        
+        degrees = float(match.group(1))
+        minutes = float(match.group(2))
+        direction = match.group(3)
+        
+        decimal = abs(degrees) + minutes / 60.0
+        
+        # Apply sign based on direction or original sign
+        if direction:
+            if direction.upper() in ['S', 'W']:
+                decimal = -decimal
+        elif degrees < 0:
+            decimal = -decimal
+        
+        return decimal
+    
+    def validate_and_convert_coordinate(self, value, coord_type="latitude"):
+        """Validate coordinate format and offer conversion if needed"""
+        if not value or not value.strip():
+            return None, False
+        
+        value = value.strip()
+        
+        # Check if already in decimal degrees format
+        if self.is_decimal_degrees(value):
+            try:
+                num = float(value)
+                # Validate range
+                if coord_type == "latitude" and (-90 <= num <= 90):
+                    return num, True
+                elif coord_type == "longitude" and (-180 <= num <= 180):
+                    return num, True
+                else:
+                    return None, False
+            except ValueError:
+                return None, False
+        
+        # Detect format
+        format_type = self.detect_coordinate_format(value)
+        
+        if format_type is None:
+            return None, False
+        
+        # Try to convert
+        converted = None
+        if format_type == "dms":
+            converted = self.convert_dms_to_decimal(value)
+        elif format_type == "dm":
+            converted = self.convert_dm_to_decimal(value)
+        
+        if converted is None:
+            return None, False
+        
+        # Validate range after conversion
+        if coord_type == "latitude" and not (-90 <= converted <= 90):
+            return None, False
+        elif coord_type == "longitude" and not (-180 <= converted <= 180):
+            return None, False
+        
+        return converted, True
+    
+    def prompt_coordinate_conversion(self, value, coord_type, converted_value):
+        """Prompt user to convert coordinate format"""
+        coord_name = "Latitude" if coord_type == "latitude" else "Longitude"
+        format_type = self.detect_coordinate_format(value)
+        
+        if format_type == "dms":
+            format_desc = "degrees/minutes/seconds"
+        elif format_type == "dm":
+            format_desc = "degrees/minutes"
+        else:
+            format_desc = "unknown format"
+        
+        message = (
+            f"{coord_name} appears to be in {format_desc} format.\n\n"
+            f"Input: {value}\n"
+            f"Converted to decimal degrees: {converted_value:.6f}\n\n"
+            "Would you like to use the converted value?"
+        )
+        
+        result = messagebox.askyesno(
+            "Coordinate Format Conversion",
+            message,
+            icon='question'
+        )
+        
+        return result
+    
     def update_bounds_from_waypoint(self, *args):
         """Auto-populate bounds from waypoint lat/lon"""
         wpt_lat = self.wpt_lat_var.get()
@@ -123,7 +282,7 @@ class GPXCreatorApp:
         self.sym_var.set("WayPoint")
     
     def validate_fields(self):
-        """Validate that required fields are filled"""
+        """Validate that required fields are filled and coordinates are in correct format"""
         if not self.time_var.get():
             messagebox.showerror("Error", "Time is required")
             return False
@@ -135,6 +294,50 @@ class GPXCreatorApp:
         if not self.name_var.get():
             messagebox.showerror("Error", "Name is required")
             return False
+        
+        # Validate and convert latitude
+        lat_value = self.wpt_lat_var.get()
+        lat_decimal, is_valid = self.validate_and_convert_coordinate(lat_value, "latitude")
+        
+        if not is_valid:
+            messagebox.showerror(
+                "Invalid Latitude Format",
+                "Latitude must be in decimal degrees format (e.g., 33.14711).\n\n"
+                "Valid range: -90 to 90 degrees.\n\n"
+                "Supported alternative formats:\n"
+                "- Degrees/Minutes/Seconds: 33°14'11\"\n"
+                "- Degrees/Minutes: 33°14.5'"
+            )
+            return False
+        
+        # If conversion was needed, offer to use converted value
+        if not self.is_decimal_degrees(lat_value):
+            if self.prompt_coordinate_conversion(lat_value, "latitude", lat_decimal):
+                self.wpt_lat_var.set(f"{lat_decimal:.6f}")
+            else:
+                return False
+        
+        # Validate and convert longitude
+        lon_value = self.wpt_lon_var.get()
+        lon_decimal, is_valid = self.validate_and_convert_coordinate(lon_value, "longitude")
+        
+        if not is_valid:
+            messagebox.showerror(
+                "Invalid Longitude Format",
+                "Longitude must be in decimal degrees format (e.g., -79.13536).\n\n"
+                "Valid range: -180 to 180 degrees.\n\n"
+                "Supported alternative formats:\n"
+                "- Degrees/Minutes/Seconds: 79°8'7\"\n"
+                "- Degrees/Minutes: 79°8.1'"
+            )
+            return False
+        
+        # If conversion was needed, offer to use converted value
+        if not self.is_decimal_degrees(lon_value):
+            if self.prompt_coordinate_conversion(lon_value, "longitude", lon_decimal):
+                self.wpt_lon_var.set(f"{lon_decimal:.6f}")
+            else:
+                return False
         
         # Ensure bounds are populated from waypoint
         self.update_bounds_from_waypoint()
