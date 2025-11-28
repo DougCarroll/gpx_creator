@@ -151,6 +151,14 @@ python -m tkinter
 
 If a small window appears, tkinter is installed correctly. Close the window to continue.
 
+## Video Tutorial
+
+Watch a demonstration of how to use the GPX Creator application:
+
+[![GPX Creator Tutorial](https://img.youtube.com/vi/_k87dnQmCfg/0.jpg)](https://youtu.be/_k87dnQmCfg)
+
+[View on YouTube](https://youtu.be/_k87dnQmCfg)
+
 ## Usage
 
 Run the application:
