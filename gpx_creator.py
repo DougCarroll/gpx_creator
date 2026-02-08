@@ -30,6 +30,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import re
+import webbrowser
 
 
 class GPXCreatorApp:
@@ -88,6 +89,14 @@ class GPXCreatorApp:
         
         ttk.Button(button_frame, text="Create GPX File", command=self.create_gpx_file).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Clear", command=self.clear_fields).pack(side=tk.LEFT, padx=5)
+        
+        # Copyright notice
+        copyright_frame = ttk.Frame(main_frame)
+        copyright_frame.grid(row=6, column=0, columnspan=3, pady=(15, 0))
+        ttk.Label(copyright_frame, text=f"© {datetime.now().year} Douglas Carroll — ", font=("", 9)).pack(side=tk.LEFT)
+        link_label = ttk.Label(copyright_frame, text="svburnttoast.com", font=("", 9), foreground="blue", cursor="hand2")
+        link_label.pack(side=tk.LEFT)
+        link_label.bind("<Button-1>", lambda e: webbrowser.open("https://svburnttoast.com/"))
         
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
@@ -225,33 +234,6 @@ class GPXCreatorApp:
         
         return converted, True
     
-    def prompt_coordinate_conversion(self, value, coord_type, converted_value):
-        """Prompt user to convert coordinate format"""
-        coord_name = "Latitude" if coord_type == "latitude" else "Longitude"
-        format_type = self.detect_coordinate_format(value)
-        
-        if format_type == "dms":
-            format_desc = "degrees/minutes/seconds"
-        elif format_type == "dm":
-            format_desc = "degrees/minutes"
-        else:
-            format_desc = "unknown format"
-        
-        message = (
-            f"{coord_name} appears to be in {format_desc} format.\n\n"
-            f"Input: {value}\n"
-            f"Converted to decimal degrees: {converted_value:.6f}\n\n"
-            "Would you like to use the converted value?"
-        )
-        
-        result = messagebox.askyesno(
-            "Coordinate Format Conversion",
-            message,
-            icon='question'
-        )
-        
-        return result
-    
     def update_bounds_from_waypoint(self, *args):
         """Auto-populate bounds from waypoint lat/lon"""
         wpt_lat = self.wpt_lat_var.get()
@@ -310,12 +292,9 @@ class GPXCreatorApp:
             )
             return False
         
-        # If conversion was needed, offer to use converted value
+        # If conversion was needed, apply converted value automatically
         if not self.is_decimal_degrees(lat_value):
-            if self.prompt_coordinate_conversion(lat_value, "latitude", lat_decimal):
-                self.wpt_lat_var.set(f"{lat_decimal:.6f}")
-            else:
-                return False
+            self.wpt_lat_var.set(f"{lat_decimal:.6f}")
         
         # Validate and convert longitude
         lon_value = self.wpt_lon_var.get()
@@ -332,12 +311,9 @@ class GPXCreatorApp:
             )
             return False
         
-        # If conversion was needed, offer to use converted value
+        # If conversion was needed, apply converted value automatically
         if not self.is_decimal_degrees(lon_value):
-            if self.prompt_coordinate_conversion(lon_value, "longitude", lon_decimal):
-                self.wpt_lon_var.set(f"{lon_decimal:.6f}")
-            else:
-                return False
+            self.wpt_lon_var.set(f"{lon_decimal:.6f}")
         
         # Ensure bounds are populated from waypoint
         self.update_bounds_from_waypoint()
@@ -356,10 +332,16 @@ class GPXCreatorApp:
         # Ensure bounds are populated from waypoint (in case validation didn't trigger it)
         self.update_bounds_from_waypoint()
         
-        # Ask for save location
+        # Ask for save location; suggest filename from Name field
+        default_name = self.name_var.get().strip()
+        for c in r'\/:*?"<>|':
+            default_name = default_name.replace(c, "_")
+        if not default_name:
+            default_name = "waypoint"
         filename = filedialog.asksaveasfilename(
             defaultextension=".gpx",
-            filetypes=[("GPX files", "*.gpx"), ("All files", "*.*")]
+            filetypes=[("GPX files", "*.gpx"), ("All files", "*.*")],
+            initialfile=default_name
         )
         
         if not filename:
@@ -446,7 +428,6 @@ class GPXCreatorApp:
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(formatted_xml)
             
-            messagebox.showinfo("Success", f"GPX file created successfully:\n{filename}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to create GPX file:\n{str(e)}")
